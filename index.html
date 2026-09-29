@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Air Writing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{--paper:#E8EDF2;--ink:#182233;--muted:#56667A;--line:#C3CEDA;--panel:#F6F8FA;--accent:#2D5BFF;--stage:#1A2432;--ok:#12805C}
+*{box-sizing:border-box}
+body{margin:0;padding:20px;min-height:100vh;background:var(--paper);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,sans-serif}
+.app{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:20px;align-items:start}
+header{grid-column:1/-1}
+h1{margin:0 0 6px;font-size:clamp(1.7rem,4vw,2.5rem);font-weight:800;letter-spacing:-.02em}
+header p{margin:0;max-width:62ch;color:var(--muted);line-height:1.5}
+.stage{position:relative;width:100%;aspect-ratio:4/3;background:var(--stage);border-radius:14px;overflow:hidden}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%}
+video{transform:scaleX(-1);object-fit:fill}
+.pill{position:absolute;top:12px;left:12px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:99px;background:rgba(24,34,51,.78);color:#fff;font-size:.85rem;font-weight:600}
+.pill i{width:9px;height:9px;border-radius:50%;background:#8A97A8}
+.pill[data-s=hover] i{background:#7CC4FF}
+.pill[data-s=write] i{background:#3DDC97}
+.pill[data-s=erase] i{background:#FF7A8A}
+.overlay{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:10px;padding:24px;text-align:center;background:rgba(26,36,50,.92);color:#fff}
+.overlay[hidden]{display:none}
+.overlay h2{margin:0;font-size:1.3rem}
+.overlay p{margin:0;max-width:40ch;line-height:1.5;color:#C9D3E0}
+.spin{width:34px;height:34px;border-radius:50%;border:4px solid #3A4A60;border-top-color:#fff;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;display:grid;gap:20px}
+fieldset{border:0;margin:0;padding:0;min-width:0}
+legend,.lbl{padding:0;margin-bottom:8px;font-size:.9rem;font-weight:600}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg span{display:block;padding:9px 6px;text-align:center;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-size:.9rem}
+.seg input:checked+span{background:var(--ink);border-color:var(--ink);color:#fff}
+.seg input:focus-visible+span,button:focus-visible,input[type=color]:focus-visible,input[type=range]:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.hint{margin:8px 0 0;font-size:.85rem;color:var(--muted);line-height:1.45}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+input[type=color]{width:44px;height:36px;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
+.sw{width:28px;height:28px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
+input[type=range]{width:100%;accent-color:var(--accent)}
+button.btn{padding:11px 14px;border:0;border-radius:8px;background:var(--accent);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button.btn:hover{filter:brightness(1.08)}
+button.ghost{background:transparent;border:1px solid #fff;margin-top:6px}
+@media(max-width:860px){.app{grid-template-columns:1fr}body{padding:12px}}
+</style>
+</head>
+<body>
+<main class="app">
+  <header>
+    <h1>Air Writing</h1>
+    <p>Pinch your thumb and index finger together to write in the air. Open your fingers to move without leaving a mark.</p>
+  </header>
+
+  <section class="stage" id="stage" aria-label="Camera view with drawing layer">
+    <video id="video" playsinline muted></video>
+    <canvas id="ink"></canvas>
+    <canvas id="fx"></canvas>
+    <div class="pill" id="pill" data-s="none"><i></i><span id="pillTxt">Show your hand</span></div>
+    <div class="overlay" id="overlay" role="status" aria-live="polite">
+      <div class="spin" id="spin"></div>
+      <h2 id="ovTitle">Loading AI Model...</h2>
+      <p id="ovMsg">Starting the hand tracker and camera. This takes a few seconds the first time.</p>
+      <button class="btn ghost" id="retry" hidden>Try again</button>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <fieldset>
+      <legend>Mode</legend>
+      <div class="seg" id="modes">
+        <label><input type="radio" name="mode" value="pinch" checked><span>Pinch to write</span></label>
+        <label><input type="radio" name="mode" value="draw"><span>Always write</span></label>
+        <label><input type="radio" name="mode" value="hover"><span>Hover only</span></label>
+        <label><input type="radio" name="mode" value="erase"><span>Pinch to erase</span></label>
+      </div>
+      <p class="hint" id="hint"></p>
+    </fieldset>
+
+    <div>
+      <div class="lbl">Brush color</div>
+      <div class="row">
+        <input type="color" id="color" value="#FFD23F" aria-label="Brush color">
+        <button class="sw" data-c="#FFFFFF" style="background:#FFFFFF" aria-label="White"></button>
+        <button class="sw" data-c="#FFD23F" style="background:#FFD23F" aria-label="Yellow"></button>
+        <button class="sw" data-c="#FF5C7A" style="background:#FF5C7A" aria-label="Coral"></button>
+        <button class="sw" data-c="#4FD8FF" style="background:#4FD8FF" aria-label="Cyan"></button>
+        <button class="sw" data-c="#3DDC97" style="background:#3DDC97" aria-label="Green"></button>
+      </div>
+    </div>
+
+    <div>
+      <label class="lbl" for="size">Brush size</label>
+      <input type="range" id="size" min="2" max="24" value="7">
+    </div>
+
+    <button class="btn" id="clear">Clear canvas</button>
+  </aside>
+</main>
+
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const $ = s => document.querySelector(s);
+const video = $('#video'), ink = $('#ink'), fx = $('#fx'), stage = $('#stage');
+const ictx = ink.getContext('2d'), fctx = fx.getContext('2d');
+
+const LERP = 0.4;            // smoothing: lower = smoother but laggier
+const PINCH_ON = 0.22;       // thumb-index distance / hand size to start writing
+const PINCH_OFF = 0.32;      // distance to stop writing (hysteresis avoids flicker)
+const LOST_FRAMES = 6;       // frames without a hand before the stroke ends
+
+const S = { mode: 'pinch', color: '#FFD23F', size: 7, pinching: false, x: 0, y: 0, has: false, prev: null, lost: 0 };
+let landmarker = null, running = false, lastT = -1;
+
+const HINTS = {
+  pinch: 'Pinch thumb and index together to write. Open them to move.',
+  draw: 'Writes continuously while your hand is visible.',
+  hover: 'Shows the pointer only. Nothing is drawn.',
+  erase: 'Pinch thumb and index together to erase.'
+};
+const hint = () => $('#hint').textContent = HINTS[S.mode];
+hint();
+
+/* ---------- canvas sizing ---------- */
+function fit() {
+  const r = stage.getBoundingClientRect(), d = devicePixelRatio || 1;
+  const w = Math.round(r.width * d), h = Math.round(r.height * d);
+  if (!w || (ink.width === w && ink.height === h)) return;
+  const old = document.createElement('canvas');
+  old.width = ink.width; old.height = ink.height;
+  old.getContext('2d').drawImage(ink, 0, 0);
+  ink.width = fx.width = w; ink.height = fx.height = h;
+  ictx.drawImage(old, 0, 0, w, h);
+}
+new ResizeObserver(fit).observe(stage);
+
+/* ---------- overlay + errors ---------- */
+function showLoading() {
+  $('#overlay').hidden = false; $('#overlay').setAttribute('role', 'status');
+  $('#spin').hidden = false; $('#retry').hidden = true;
+  $('#ovTitle').textContent = 'Loading AI Model...';
+  $('#ovMsg').textContent = 'Starting the hand tracker and camera. This takes a few seconds the first time.';
+}
+function showError(e) {
+  const map = {
+    NotAllowedError: ['Camera access is blocked', 'Allow camera access for this page in your browser\'s address bar, then press Try again.'],
+    SecurityError: ['Camera access is blocked', 'Your browser blocked the camera for this page. Open the file over https:// or http://localhost, then press Try again.'],
+    NotFoundError: ['No camera found', 'Connect a webcam, then press Try again.'],
+    OverconstrainedError: ['No compatible camera', 'Your camera does not support the requested settings. Try a different camera.'],
+    NotReadableError: ['Camera is in use', 'Close other apps that use the camera (Zoom, Meet, Teams), then press Try again.'],
+    Unsupported: ['Browser not supported', 'Use a recent Chrome, Edge, Firefox or Safari. The camera needs https:// or http://localhost.'],
+    ModelError: ['Could not load the AI model', 'Check your internet connection, then press Try again.']
+  };
+  const [t, m] = map[e && e.name] || ['Something went wrong', (e && e.message) || String(e)];
+  console.error(e);
+  $('#overlay').hidden = false; $('#overlay').setAttribute('role', 'alert');
+  $('#spin').hidden = true; $('#retry').hidden = false;
+  $('#ovTitle').textContent = t; $('#ovMsg').textContent = m;
+}
+
+/* ---------- model + camera ---------- */
+async function loadModel() {
+  try {
+    const fs = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    const make = delegate => HandLandmarker.createFromOptions(fs, {
+      baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate },
+      runningMode: 'VIDEO', numHands: 1,
+      minHandDetectionConfidence: 0.6, minHandPresenceConfidence: 0.6, minTrackingConfidence: 0.5
+    });
+    try { return await make('GPU'); } catch { return await make('CPU'); }
+  } catch (e) { e.name = 'ModelError'; throw e; }
+}
+
+async function startCam() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw { name: 'Unsupported' };
+  if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false
+  });
+  video.srcObject = stream;
+  await new Promise(r => video.onloadedmetadata = r);
+  await video.play();
+  stage.style.aspectRatio = video.videoWidth + ' / ' + video.videoHeight;
+  fit();
+}
+
+async function init() {
+  showLoading();
+  try {
+    const [lm] = await Promise.all([landmarker || loadModel(), startCam()]);
+    landmarker = lm;
+    $('#overlay').hidden = true;
+    if (!running) { running = true; loop(); }
+  } catch (e) { showError(e); }
+}
+$('#retry').onclick = init;
+
+/* ---------- main loop ---------- */
+function loop() {
+  requestAnimationFrame(loop);
+  if (!landmarker || video.readyState < 2 || video.currentTime === lastT) return;
+  lastT = video.currentTime;
+  const res = landmarker.detectForVideo(video, performance.now());
+  update(res.landmarks && res.landmarks[0]);
+}
+
+function setPill(state, text) {
+  const p = $('#pill');
+  if (p.dataset.s !== state) { p.dataset.s = state; $('#pillTxt').textContent = text; }
+}
+
+function update(lm) {
+  const W = fx.width, H = fx.height, d = devicePixelRatio || 1;
+  fctx.clearRect(0, 0, W, H);
+
+  if (!lm) {
+    if (++S.lost > LOST_FRAMES) { S.prev = null; S.has = false; S.pinching = false; setPill('none', 'Show your hand'); }
+    return;
+  }
+  S.lost = 0;
+
+  // Mirror x so canvas coordinates match the mirrored video
+  const tx = (1 - lm[8].x) * W, ty = lm[8].y * H;
+  if (!S.has) { S.x = tx; S.y = ty; S.has = true; }
+  else { S.x += (tx - S.x) * LERP; S.y += (ty - S.y) * LERP; }   // Lerp smoothing
+
+  // Pinch ratio, normalized by hand size and corrected for video aspect ratio
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const pinch = Math.hypot((lm[4].x - lm[8].x) * vw, (lm[4].y - lm[8].y) * vh);
+  const size = Math.hypot((lm[0].x - lm[9].x) * vw, (lm[0].y - lm[9].y) * vh) || 1;
+  const ratio = pinch / size;
+  if (!S.pinching && ratio < PINCH_ON) S.pinching = true;
+  else if (S.pinching && ratio > PINCH_OFF) S.pinching = false;
+
+  const active = S.mode === 'hover' ? false : S.mode === 'draw' ? true : S.pinching;
+  const erasing = S.mode === 'erase';
+
+  if (active) {
+    const p = S.prev || { x: S.x, y: S.y };   // same point + round cap = a dot
+    ictx.save();
+    ictx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+    ictx.strokeStyle = S.color;
+    ictx.lineWidth = S.size * d * (erasing ? 4 : 1);
+    ictx.lineCap = ictx.lineJoin = 'round';
+    ictx.beginPath(); ictx.moveTo(p.x, p.y); ictx.lineTo(S.x, S.y); ictx.stroke();
+    ictx.restore();
+    S.prev = { x: S.x, y: S.y };
+  } else S.prev = null;
+
+  // Pointer guide on the top layer
+  const r = (active && !erasing ? S.size * 0.5 + 4 : 14) * d;
+  fctx.lineWidth = 2 * d;
+  fctx.strokeStyle = 'rgba(255,255,255,.95)';
+  fctx.fillStyle = active && !erasing ? S.color : 'transparent';
+  fctx.beginPath(); fctx.arc(S.x, S.y, r, 0, Math.PI * 2);
+  if (active && !erasing) fctx.fill();
+  fctx.stroke();
+  fctx.fillStyle = 'rgba(255,255,255,.85)';
+  fctx.beginPath(); fctx.arc((1 - lm[4].x) * W, lm[4].y * H, 4 * d, 0, Math.PI * 2); fctx.fill();
+
+  setPill(active ? (erasing ? 'erase' : 'write') : 'hover',
+          active ? (erasing ? 'Erasing' : 'Writing') : 'Hovering');
+}
+
+/* ---------- controls ---------- */
+$('#modes').addEventListener('change', e => { S.mode = e.target.value; S.prev = null; hint(); });
+$('#color').addEventListener('input', e => S.color = e.target.value);
+document.querySelectorAll('.sw').forEach(b => b.onclick = () => { S.color = b.dataset.c; $('#color').value = b.dataset.c; });
+$('#size').addEventListener('input', e => S.size = +e.target.value);
+$('#clear').onclick = () => ictx.clearRect(0, 0, ink.width, ink.height);
+
+init();
+</script>
+</body>
+</html>
